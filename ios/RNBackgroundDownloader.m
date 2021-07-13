@@ -42,7 +42,7 @@ RCT_EXPORT_MODULE();
 
 - (NSDictionary *)constantsToExport {
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    
+
     return @{
              @"documents": [paths firstObject],
              @"TaskRunning": @(NSURLSessionTaskStateRunning),
@@ -136,16 +136,16 @@ RCT_EXPORT_METHOD(download: (NSDictionary *) options) {
         NSLog(@"[RNBackgroundDownloader] - [Error] id, url and destination must be set");
         return;
     }
-    [self lazyInitSession];
-    
+
     NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:[NSURL URLWithString:url]];
     if (headers != nil) {
         for (NSString *headerKey in headers) {
             [request setValue:[headers valueForKey:headerKey] forHTTPHeaderField:headerKey];
         }
     }
-    
+
     @synchronized (sharedLock) {
+        [self lazyInitSession];
         NSURLSessionDownloadTask __strong *task = [urlSession downloadTaskWithRequest:request];
         RNBGDTaskConfig *taskConfig = [[RNBGDTaskConfig alloc] initWithDictionary: @{@"id": identifier, @"destination": destination}];
 
@@ -154,7 +154,7 @@ RCT_EXPORT_METHOD(download: (NSDictionary *) options) {
 
         idToTaskMap[identifier] = task;
         idToPercentMap[identifier] = @0.0;
-        
+
         [task resume];
         lastProgressReport = [[NSDate alloc] init];
     }
@@ -192,16 +192,16 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
     [self lazyInitSession];
     [urlSession getTasksWithCompletionHandler:^(NSArray<NSURLSessionDataTask *> * _Nonnull dataTasks, NSArray<NSURLSessionUploadTask *> * _Nonnull uploadTasks, NSArray<NSURLSessionDownloadTask *> * _Nonnull downloadTasks) {
         NSMutableArray *idsFound = [[NSMutableArray alloc] init];
-        @synchronized (sharedLock) {
+        @synchronized (self->sharedLock) {
             for (NSURLSessionDownloadTask *foundTask in downloadTasks) {
                 NSURLSessionDownloadTask __strong *task = foundTask;
-                RNBGDTaskConfig *taskConfig = taskToConfigMap[@(task.taskIdentifier)];
+                RNBGDTaskConfig *taskConfig = self->taskToConfigMap[@(task.taskIdentifier)];
                 if (taskConfig) {
                     if (task.state == NSURLSessionTaskStateCompleted && task.countOfBytesReceived < task.countOfBytesExpectedToReceive) {
                         if (task.error && task.error.code == -999 && task.error.userInfo[NSURLSessionDownloadTaskResumeData] != nil) {
-                            task = [urlSession downloadTaskWithResumeData:task.error.userInfo[NSURLSessionDownloadTaskResumeData]];
+                            task = [self->urlSession downloadTaskWithResumeData:task.error.userInfo[NSURLSessionDownloadTaskResumeData]];
                         } else {
-                            task = [urlSession downloadTaskWithURL:foundTask.currentRequest.URL];
+                            task = [self->urlSession downloadTaskWithURL:foundTask.currentRequest.URL];
                         }
                         [task resume];
                     }
@@ -214,9 +214,9 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
                                           @"percent": percent
                                           }];
                     taskConfig.reportedBegin = YES;
-                    taskToConfigMap[@(task.taskIdentifier)] = taskConfig;
-                    idToTaskMap[taskConfig.id] = task;
-                    idToPercentMap[taskConfig.id] = percent;
+                    self->taskToConfigMap[@(task.taskIdentifier)] = taskConfig;
+                    self->idToTaskMap[taskConfig.id] = task;
+                    self->idToPercentMap[taskConfig.id] = percent;
                 } else {
                     [task cancel];
                 }
@@ -258,14 +258,14 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
                 [self sendEventWithName:@"downloadBegin" body:@{@"id": taskCofig.id, @"expectedBytes": [NSNumber numberWithLongLong: totalBytesExpectedToWrite]}];
                 taskCofig.reportedBegin = YES;
             }
-            
+
             NSNumber *prevPercent = idToPercentMap[taskCofig.id];
             NSNumber *percent = [NSNumber numberWithFloat:(float)totalBytesWritten/(float)totalBytesExpectedToWrite];
             if ([percent floatValue] - [prevPercent floatValue] > 0.01f) {
                 progressReports[taskCofig.id] = @{@"id": taskCofig.id, @"written": [NSNumber numberWithLongLong: totalBytesWritten], @"total": [NSNumber numberWithLongLong: totalBytesExpectedToWrite], @"percent": percent};
                 idToPercentMap[taskCofig.id] = percent;
             }
-            
+
             NSDate *now = [[NSDate alloc] init];
             if ([now timeIntervalSinceDate:lastProgressReport] > 0.25 && progressReports.count > 0) {
                 if (self.bridge) {
@@ -308,7 +308,7 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
     if (data == nil) {
         return nil;
     }
-    
+
     return [NSKeyedUnarchiver unarchiveObjectWithData:data];
 }
 
