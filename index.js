@@ -126,9 +126,10 @@ export const Priority = {
 
 export default {
     download,
+    downloadFiles,
     checkForExistingDownloads,
     setHeaders,
     directories,
     Network,
-    Priority
+    Priority,
 };
