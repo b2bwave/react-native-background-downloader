@@ -105,7 +105,7 @@ export function downloadFiles(fileOptions) {
     tasksMap.set(options.id, task);
     tasks.push(task);
   }
-  RNBackgroundDownloader.downloadFiles(options);
+  RNBackgroundDownloader.downloadFiles(fileOptions);
   return tasks;
 }
 
