@@ -8,6 +8,7 @@ import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
+import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReadableMapKeySetIterator;
 import com.facebook.react.bridge.WritableArray;
@@ -23,9 +24,8 @@ import com.tonyodev.fetch2.Priority;
 import com.tonyodev.fetch2.Request;
 import com.tonyodev.fetch2.Status;
 import com.tonyodev.fetch2core.DownloadBlock;
-import com.tonyodev.fetch2core.Func;
-import com.tonyodev.fetch2.HttpUrlConnectionDownloader;
 import com.tonyodev.fetch2core.Downloader;
+import com.tonyodev.fetch2core.Func;
 import com.tonyodev.fetch2okhttp.OkHttpDownloader;
 
 import org.jetbrains.annotations.NotNull;
@@ -42,6 +42,8 @@ import java.util.List;
 import java.util.Map;
 
 import javax.annotation.Nullable;
+
+import okhttp3.OkHttpClient;
 
 public class RNBackgroundDownloaderModule extends ReactContextBaseJavaModule implements FetchListener {
 
@@ -81,11 +83,14 @@ public class RNBackgroundDownloaderModule extends ReactContextBaseJavaModule imp
     super(reactContext);
 
     loadConfigMap();
+    OkHttpClient okHttpClient = new OkHttpClient.Builder().build();
+    final Downloader okHttpDownloader = new OkHttpDownloader(okHttpClient,
+            Downloader.FileDownloaderType.PARALLEL);
     FetchConfiguration fetchConfiguration = new FetchConfiguration.Builder(this.getReactApplicationContext())
             .setDownloadConcurrentLimit(10)
             .setNamespace("RNBackgroundDownloader")
             .enableRetryOnNetworkGain(true)
-            .setHttpDownloader(new OkHttpDownloader(Downloader.FileDownloaderType.PARALLEL))
+            .setHttpDownloader(okHttpDownloader)
             .build();
     fetch = Fetch.Impl.getInstance(fetchConfiguration);
     fetch.addListener(this);
@@ -186,9 +191,31 @@ public class RNBackgroundDownloaderModule extends ReactContextBaseJavaModule imp
     }
   }
 
-  // JS Methods
   @ReactMethod
-  public void download(ReadableMap options) {
+  public void downloadFiles(ReadableMap options) {
+    ReadableArray downloads = options.getArray("downloads");
+
+    if (downloads == null) {
+      return;
+    }
+    for (int i = 0; i < downloads.size(); i++) {
+      ReadableMap downloadInfo = downloads.getMap(i);
+      final String id = downloadInfo.getString("id");
+      int requestID = this.downloadImpl(downloadInfo);
+      if (requestID != -1) {
+        RNBGDTaskConfig config = new RNBGDTaskConfig(id);
+        idToRequestId.put(id, requestID);
+        requestIdToConfig.put(requestID, config);
+      }
+    }
+
+    synchronized(sharedLock) {
+      lastProgressReport = new Date();
+      saveConfigMap();
+    }
+  }
+
+  private int downloadImpl(ReadableMap options) {
     final String id = options.getString("id");
     String url = options.getString("url");
     String destination = options.getString("destination");
@@ -196,10 +223,9 @@ public class RNBackgroundDownloaderModule extends ReactContextBaseJavaModule imp
 
     if (id == null || url == null || destination == null) {
       Log.e(getName(), "id, url and destination must be set");
-      return;
+      return -1;
     }
 
-    RNBGDTaskConfig config = new RNBGDTaskConfig(id);
     final Request request = new Request(url, destination);
     if (headers != null) {
       ReadableMapKeySetIterator it = headers.keySetIterator();
@@ -236,11 +262,24 @@ public class RNBackgroundDownloaderModule extends ReactContextBaseJavaModule imp
       }
     );
 
+    return request.getId();
+  }
+
+  // JS Methods
+  @ReactMethod
+  public void download(ReadableMap options) {
+    final String id = options.getString("id");
+
+    int requestID = this.downloadImpl(options);
+
     synchronized(sharedLock) {
       lastProgressReport = new Date();
-      idToRequestId.put(id, request.getId());
-      requestIdToConfig.put(request.getId(), config);
-      saveConfigMap();
+      if (requestID != -1) {
+        RNBGDTaskConfig config = new RNBGDTaskConfig(id);
+        idToRequestId.put(id, requestID);
+        requestIdToConfig.put(requestID, config);
+        saveConfigMap();
+      }
     }
   }
 

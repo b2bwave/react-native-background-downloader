@@ -89,6 +89,26 @@ export function download(options) {
     return task;
 }
 
+export function downloadFiles(fileOptions) {
+  let tasks = [];
+  for (let i = 0; i < fileOptions.length; i++) {
+    let options = fileOptions[i];
+    if (options.headers && typeof options.headers === "object") {
+      options.headers = {
+        ...headers,
+        ...options.headers,
+      };
+    } else {
+      options.headers = headers;
+    }
+    const task = new DownloadTask(options.id);
+    tasksMap.set(options.id, task);
+    tasks.push(task);
+  }
+  RNBackgroundDownloader.downloadFiles(options);
+  return tasks;
+}
+
 export const directories = {
     documents: RNBackgroundDownloader.documents
 };
