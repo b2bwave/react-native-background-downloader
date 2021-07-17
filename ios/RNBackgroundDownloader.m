@@ -65,7 +65,7 @@ RCT_EXPORT_MODULE();
         NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
         NSString *sessonIdentifier = [bundleIdentifier stringByAppendingString:@".backgrounddownloadtask"];
         sessionConfig = [NSURLSessionConfiguration backgroundSessionConfigurationWithIdentifier:sessonIdentifier];
-        sessionConfig.HTTPMaximumConnectionsPerHost = 4;
+        sessionConfig.HTTPMaximumConnectionsPerHost = 10;
         progressReports = [[NSMutableDictionary alloc] init];
         lastProgressReport = [[NSDate alloc] init];
         sharedLock = [NSNumber numberWithInt:1];
@@ -107,26 +107,91 @@ RCT_EXPORT_MODULE();
 }
 
 - (NSError *)getServerError: (nonnull NSURLSessionDownloadTask *)downloadTask {
-  NSError *serverError;
-  NSInteger httpStatusCode = [((NSHTTPURLResponse *)downloadTask.response) statusCode];
-  if(httpStatusCode != 200) {
+    NSError *serverError;
+    NSInteger httpStatusCode = [((NSHTTPURLResponse *)downloadTask.response) statusCode];
+    if(httpStatusCode != 200) {
       serverError = [NSError errorWithDomain:NSURLErrorDomain
                                         code:httpStatusCode
                                     userInfo:@{NSLocalizedDescriptionKey: [NSHTTPURLResponse localizedStringForStatusCode: httpStatusCode]}];
-  }
-  return serverError;
+    }
+    return serverError;
 }
 
 - (BOOL)saveDownloadedFile: (nonnull RNBGDTaskConfig *) taskConfig downloadURL:(nonnull NSURL *)location error:(NSError **)saveError {
-  NSFileManager *fileManager = [NSFileManager defaultManager];
-  NSURL *destURL = [NSURL fileURLWithPath:taskConfig.destination];
-  [fileManager createDirectoryAtURL:[destURL URLByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
-  [fileManager removeItemAtURL:destURL error:nil];
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSURL *destURL = [NSURL fileURLWithPath:taskConfig.destination];
+    [fileManager createDirectoryAtURL:[destURL URLByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
+    [fileManager removeItemAtURL:destURL error:nil];
 
-  return [fileManager moveItemAtURL:location toURL:destURL error:saveError];
+    return [fileManager moveItemAtURL:location toURL:destURL error:saveError];
+}
+
+- (NSURLSessionDownloadTask*)downloadImpl: (NSDictionary*) options {
+    NSString *identifier = options[@"id"];
+    NSString *url = options[@"url"];
+    NSString *destination = options[@"destination"];
+    NSDictionary *headers = options[@"headers"];
+    if (identifier == nil || url == nil || destination == nil) {
+        NSLog(@"[RNBackgroundDownloader] - [Error] id, url and destination must be set");
+        return nil;
+    }
+
+    NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:[NSURL URLWithString:url]];
+    if (headers != nil) {
+        for (NSString *headerKey in headers) {
+            [request setValue:[headers valueForKey:headerKey] forHTTPHeaderField:headerKey];
+        }
+    }
+
+    NSURLSessionDownloadTask __strong *task = [urlSession downloadTaskWithRequest:request];
+    idToTaskMap[identifier] = task;
+    idToPercentMap[identifier] = @0.0;
+
+    return task;
+}
+
+- (void)startDownloadTasks:(NSMutableArray<NSURLSessionDownloadTask*>*) tasks {
+    if (tasks.count > 0) {
+        @synchronized (sharedLock) {
+            [[NSUserDefaults standardUserDefaults] setObject:[self serialize: taskToConfigMap] forKey:ID_TO_CONFIG_MAP_KEY];
+
+            for (int i = 0; i < tasks.count; i++) {
+                [tasks[i] resume];
+            }
+
+            [tasks removeAllObjects];
+        }
+    }
 }
 
 #pragma mark - JS exported methods
+RCT_EXPORT_METHOD(downloadFiles: (NSArray*) downloads) {
+    @synchronized (sharedLock) {
+        [self lazyInitSession];
+        lastProgressReport = [[NSDate alloc] init];
+
+        NSMutableArray<NSURLSessionDownloadTask*> *tasks = [[NSMutableArray alloc] init];
+
+        for (int i = 0; i < downloads.count; i++) {
+            NSDictionary* options = downloads[i];
+            NSString *identifier = options[@"id"];
+            NSString *destination = options[@"destination"];
+            NSURLSessionDownloadTask* task = [self downloadImpl:options];
+
+            if (task != nil) {
+                RNBGDTaskConfig *taskConfig = [[RNBGDTaskConfig alloc] initWithDictionary: @{@"id": identifier, @"destination": destination}];
+
+                taskToConfigMap[@(task.taskIdentifier)] = taskConfig;
+                [[NSUserDefaults standardUserDefaults] setObject:[self serialize: taskToConfigMap] forKey:ID_TO_CONFIG_MAP_KEY];
+                [task resume];
+//                [tasks addObject:task];
+            }
+        }
+
+//        [self startDownloadTasks:tasks];
+    }
+}
+
 RCT_EXPORT_METHOD(download: (NSDictionary *) options) {
     NSString *identifier = options[@"id"];
     NSString *url = options[@"url"];
