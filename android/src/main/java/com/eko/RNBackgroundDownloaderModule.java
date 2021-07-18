@@ -192,9 +192,7 @@ public class RNBackgroundDownloaderModule extends ReactContextBaseJavaModule imp
   }
 
   @ReactMethod
-  public void downloadFiles(ReadableMap options) {
-    ReadableArray downloads = options.getArray("downloads");
-
+  public void downloadFiles(ReadableArray downloads) {
     if (downloads == null) {
       return;
     }
