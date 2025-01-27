@@ -23,7 +23,7 @@ dependencies {
     implementation 'com.facebook.react:react-native:+'
     if (project.properties['android.useAndroidX'] == 'true' || project.properties['android.useAndroidX'] == true) {
         api "com.github.tonyofrancis.Fetch:fetch2:3.4.0"
-        implementation "ccom.github.tonyofrancis.Fetch:fetch2okhttp:3.4.0"
+        implementation "com.github.tonyofrancis.Fetch:fetch2okhttp:3.4.0"
     } else {
         api "com.tonyodev.fetch2:fetch2:3.0.12"
         implementation "com.tonyodev.fetch2okhttp:fetch2okhttp:3.0.12"
